@@ -1,0 +1,14 @@
+## Interface: 120100
+## Title: Warbound Compare
+## Notes: Shows which of your characters can equip a Warbound item and how it compares to their currently equipped gear.
+## Author: AngerFork
+## Version: 1.0.0
+## SavedVariables: WarboundCompareDB
+## IconTexture: Interface\Icons\inv_misc_bag_10
+## Category: Inventory
+
+localization\localization-en.lua
+localization\localization-de.lua
+Core.lua
+Tooltip.lua
+Options.lua
