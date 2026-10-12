@@ -32,8 +32,113 @@ ns.SHIELD_CLASSES = {
     SHAMAN  = true,
 }
 
+-- Which game we're running in. Retail reports WOW_PROJECT_MAINLINE (1);
+-- WoW Forever reports its own project ID (18). Anything that isn't retail
+-- gets the Forever rules.
+ns.IS_RETAIL = (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE)
+ns.IS_FOREVER = not ns.IS_RETAIL
+
 -- Equipment slots we snapshot. (4 = shirt and 19 = tabard are skipped.)
+-- Forever still has the dedicated ranged slot (18): bows, guns, wands,
+-- thrown weapons, librams, idols, totems.
 ns.TRACKED_SLOTS = { 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 }
+if ns.IS_FOREVER then
+    table.insert(ns.TRACKED_SLOTS, 18)
+end
+
+-- ---------------------------------------------------------------------------
+-- Proficiency detection (Forever)
+-- ---------------------------------------------------------------------------
+
+-- In Forever, armor and weapon proficiencies are learned (plate/mail at 40,
+-- weapon skills from trainers), so we record what each character actually
+-- knows instead of trusting a static table.
+
+local SPELL_PLATE_MAIL = 750
+local SPELL_MAIL = 8737
+
+-- Starting armor for classes that upgrade at 40.
+local FOREVER_BASE_ARMOR = {
+    WARRIOR = Enum.ItemArmorSubclass.Mail,
+    PALADIN = Enum.ItemArmorSubclass.Mail,
+    HUNTER  = Enum.ItemArmorSubclass.Leather,
+    SHAMAN  = Enum.ItemArmorSubclass.Leather,
+}
+
+-- Weapon skill spell -> Enum.ItemWeaponSubclass value.
+local W = Enum.ItemWeaponSubclass or {}
+local WEAPON_SKILL_SPELLS = {
+    [196]   = W.Axe1H or 0,
+    [197]   = W.Axe2H or 1,
+    [264]   = W.Bows or 2,
+    [266]   = W.Guns or 3,
+    [198]   = W.Mace1H or 4,
+    [199]   = W.Mace2H or 5,
+    [200]   = W.Polearm or 6,
+    [201]   = W.Sword1H or 7,
+    [202]   = W.Sword2H or 8,
+    [227]   = W.Staff or 10,
+    [15590] = W.Unarmed or 13,
+    [1180]  = W.Dagger or 15,
+    [2567]  = W.Thrown or 16,
+    [5011]  = W.Crossbow or 18,
+    [5009]  = W.Wand or 19,
+}
+
+local function KnowsSpell(spellID)
+    local checks = {
+        IsPlayerSpell,
+        C_SpellBook and C_SpellBook.IsSpellKnown,
+        IsSpellKnown,
+    }
+    for _, check in ipairs(checks) do
+        if check then
+            local ok, known = pcall(check, spellID)
+            if ok and known then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- Returns the set of weapon subclasses this character has trained, or nil
+-- if nothing at all was detected (which means detection isn't working, since
+-- every class starts with at least one weapon skill).
+local function DetectWeaponSkills()
+    local skills = {}
+    local found = false
+    for spellID, subclassID in pairs(WEAPON_SKILL_SPELLS) do
+        if KnowsSpell(spellID) then
+            skills[subclassID] = true
+            found = true
+        end
+    end
+    return found and skills or nil
+end
+
+-- Best armor type this character can wear right now.
+local function DetectArmorType(classFile, level, detectionWorks)
+    local base = FOREVER_BASE_ARMOR[classFile]
+    if not base then
+        -- Cloth, leather-only classes: same as retail.
+        return ns.ARMOR_BY_CLASS[classFile]
+    end
+    if detectionWorks then
+        if KnowsSpell(SPELL_PLATE_MAIL) then
+            return Enum.ItemArmorSubclass.Plate
+        end
+        if KnowsSpell(SPELL_MAIL) then
+            return Enum.ItemArmorSubclass.Mail
+        end
+        return base
+    end
+    -- Spell checks unavailable: assume the upgrade was trained at 40.
+    if (level or 0) >= 40 then
+        return ns.ARMOR_BY_CLASS[classFile]
+    end
+    return base
+end
 
 function ns.Print(...)
     print("|cff82c5ffWarboundCompare:|r", ...)
@@ -123,8 +228,16 @@ function ns.SnapshotCharacter(conservative)
     entry.raceFile  = raceFile
     entry.className = className
     entry.classFile = classFile
-    entry.armorType = ns.ARMOR_BY_CLASS[classFile]
     entry.lastSeen  = time()
+
+    if ns.IS_FOREVER then
+        local weapons = DetectWeaponSkills()
+        entry.weapons   = weapons -- nil means "use the static table"
+        entry.armorType = DetectArmorType(classFile, level, weapons ~= nil)
+    else
+        entry.weapons   = nil
+        entry.armorType = ns.ARMOR_BY_CLASS[classFile]
+    end
 
     if entry.enabled == nil then
         entry.enabled = true
@@ -156,7 +269,26 @@ function ns.DebugScan()
         ns.Print("No entry could be created for this character.")
         return
     end
-    ns.Print(string.format("Snapshot for %s:", key))
+    ns.Print(string.format("Snapshot for %s (%s):", key, ns.IS_FOREVER and "Forever" or "Retail"))
+
+    local armorName = entry.armorType
+        and C_Item.GetItemSubClassInfo(Enum.ItemClass.Armor, entry.armorType)
+    ns.Print("  armor type: " .. tostring(armorName or entry.armorType))
+
+    if ns.IS_FOREVER then
+        if entry.weapons then
+            local names = {}
+            for subclassID in pairs(entry.weapons) do
+                names[#names + 1] = C_Item.GetItemSubClassInfo(Enum.ItemClass.Weapon, subclassID)
+                    or tostring(subclassID)
+            end
+            table.sort(names)
+            ns.Print("  weapon skills: " .. table.concat(names, ", "))
+        else
+            ns.Print("  weapon skills: not detected (using built-in class table)")
+        end
+    end
+
     for _, slot in ipairs(ns.TRACKED_SLOTS) do
         local gear = entry.gear and entry.gear[slot]
         if gear then

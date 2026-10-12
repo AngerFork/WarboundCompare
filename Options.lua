@@ -57,6 +57,10 @@ local BIND_FILTERS = {
     { key = "wue",      label = ITEM_ACCOUNTBOUND_UNTIL_EQUIP or "Warbound until equipped" },
     { key = "boe",      label = ITEM_BIND_ON_EQUIP or "Binds when equipped" },
 }
+-- In Forever, BoE is how gear moves between alts, so list it first.
+if ns.IS_FOREVER then
+    table.insert(BIND_FILTERS, 1, table.remove(BIND_FILTERS, 3))
+end
 
 local filterChecks = {}
 do

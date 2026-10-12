@@ -48,7 +48,9 @@ local SUBCLASS_SHIELD = Enum.ItemArmorSubclass.Shield
 local SUBCLASS_COSMETIC = Enum.ItemArmorSubclass.Cosmetic
 
 -- Per-class weapon proficiencies (current retail). Values are
--- Enum.ItemWeaponSubclass with numeric fallbacks.
+-- Enum.ItemWeaponSubclass with numeric fallbacks. In Forever this table is
+-- only a fallback: each character's trained weapon skills are detected at
+-- snapshot time and stored in entry.weapons.
 local W = Enum.ItemWeaponSubclass or {}
 local AXE1   = W.Axe1H or 0
 local AXE2   = W.Axe2H or 1
@@ -63,6 +65,7 @@ local GLAIVE = W.Warglaive or 9
 local STAFF  = W.Staff or 10
 local FIST   = W.Unarmed or 13
 local DAGGER = W.Dagger or 15
+local THROWN = W.Thrown or 16
 local XBOW   = W.Crossbow or 18
 local WAND   = W.Wand or 19
 local FISHING = W.Fishingpole or 20
@@ -80,16 +83,25 @@ local WEAPON_PROFICIENCIES = {
     DEMONHUNTER = Set(GLAIVE, FIST, AXE1, SWORD1),
     DRUID       = Set(STAFF, POLE, DAGGER, FIST, MACE1, MACE2),
     EVOKER      = Set(STAFF, DAGGER, FIST, AXE1, AXE2, MACE1, MACE2, SWORD1, SWORD2),
-    HUNTER      = Set(BOW, GUN, XBOW, POLE, STAFF, DAGGER, FIST, AXE1, AXE2, SWORD1, SWORD2),
+    HUNTER      = Set(BOW, GUN, XBOW, THROWN, POLE, STAFF, DAGGER, FIST, AXE1, AXE2, SWORD1, SWORD2),
     MAGE        = Set(STAFF, WAND, DAGGER, SWORD1),
     MONK        = Set(STAFF, POLE, FIST, AXE1, MACE1, SWORD1),
     PALADIN     = Set(AXE1, AXE2, MACE1, MACE2, SWORD1, SWORD2, POLE),
     PRIEST      = Set(STAFF, WAND, DAGGER, MACE1),
-    ROGUE       = Set(DAGGER, FIST, AXE1, MACE1, SWORD1, BOW, GUN, XBOW),
+    ROGUE       = Set(DAGGER, FIST, AXE1, MACE1, SWORD1, BOW, GUN, XBOW, THROWN),
     SHAMAN      = Set(STAFF, DAGGER, FIST, AXE1, AXE2, MACE1, MACE2),
     WARLOCK     = Set(STAFF, WAND, DAGGER, SWORD1),
-    WARRIOR     = Set(DAGGER, FIST, AXE1, AXE2, MACE1, MACE2, SWORD1, SWORD2, POLE, STAFF, BOW, GUN, XBOW),
+    WARRIOR     = Set(DAGGER, FIST, AXE1, AXE2, MACE1, MACE2, SWORD1, SWORD2, POLE, STAFF, BOW, GUN, XBOW, THROWN),
 }
+
+-- Relics (Forever's ranged slot for hybrid casters): which class uses which.
+local RELIC_CLASS = {}
+do
+    local A = Enum.ItemArmorSubclass
+    RELIC_CLASS[A.Libram or 7] = "PALADIN"
+    RELIC_CLASS[A.Idol or 8]   = "DRUID"
+    RELIC_CLASS[A.Totem or 9]  = "SHAMAN"
+end
 
 local ARMOR_TYPE_SUBCLASSES = {
     [Enum.ItemArmorSubclass.Cloth]   = true,
@@ -126,6 +138,15 @@ local EQUIPLOC_TO_SLOTS = {
     INVTYPE_RANGED         = { 16 },
     INVTYPE_RANGEDRIGHT    = { 16 },
 }
+
+-- Forever keeps the dedicated ranged slot (18). Bows/guns/crossbows/wands,
+-- thrown weapons, and relics all compare against it instead.
+if ns.IS_FOREVER then
+    EQUIPLOC_TO_SLOTS.INVTYPE_RANGED      = { 18 }
+    EQUIPLOC_TO_SLOTS.INVTYPE_RANGEDRIGHT = { 18 }
+    EQUIPLOC_TO_SLOTS.INVTYPE_THROWN      = { 18 }
+    EQUIPLOC_TO_SLOTS.INVTYPE_RELIC       = { 18 }
+end
 
 local HEADER_COLOR = BATTLENET_FONT_COLOR or CreateColor(0.51, 0.77, 1.0)
 local GRAY = GRAY_FONT_COLOR or CreateColor(0.6, 0.6, 0.6)
@@ -168,13 +189,17 @@ local function CharacterCanEquip(entry, classID, subclassID, equipLoc)
         if subclassID == FISHING then
             return true
         end
-        local prof = WEAPON_PROFICIENCIES[entry.classFile]
+        -- Detected skills (Forever) take priority over the static table.
+        local prof = entry.weapons or WEAPON_PROFICIENCIES[entry.classFile]
         return prof ~= nil and prof[subclassID] == true
     end
 
     -- Armor. Rings, necks, trinkets, cloaks, cosmetics: everyone.
     if subclassID == SUBCLASS_GENERIC or subclassID == SUBCLASS_COSMETIC then
         return true
+    end
+    if equipLoc == "INVTYPE_RELIC" then
+        return RELIC_CLASS[subclassID] == entry.classFile
     end
     if equipLoc == "INVTYPE_CLOAK" or equipLoc == "INVTYPE_HOLDABLE" then
         return true
